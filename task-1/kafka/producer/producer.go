@@ -1,4 +1,4 @@
-package main
+package producer
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ func RunProducer(brokers string, topic string, baseConfig *sarama.Config) error 
 		return fmt.Errorf("Can't create a producer: %w", err)
 	}
 
-	defer func() {_ = producer.Close()}() // закрытие producer для освобождения ресурсов
+	defer func() { _ = producer.Close() }() // закрытие producer для освобождения ресурсов
 
 	fmt.Println("Producer starts, sending messages...")
 
