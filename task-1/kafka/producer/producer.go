@@ -2,6 +2,7 @@ package producer
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/IBM/sarama"
 )
@@ -18,7 +19,7 @@ func RunProducer(brokers string, topic string, baseConfig *sarama.Config) error 
 	fmt.Println("Producer starts, sending messages...")
 
 	for i := range 10 {
-		message := fmt.Sprintf("Hello, Kafka! Message #%d", i)
+		message := fmt.Sprintf("Hello, Kafka! Message #%d at %s", i+1, time.Now().Format("15:04:05.000"))
 		msg := &sarama.ProducerMessage{
 			Topic: topic,
 			Value: sarama.StringEncoder(message),

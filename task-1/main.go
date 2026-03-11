@@ -1,8 +1,8 @@
 package main
 
 import (
-	"kafka-broker-demo/task-1/kafka/consumer"
-	"kafka-broker-demo/task-1/kafka/producer"
+	"kafka-broker-demo/kafka/consumer"
+	"kafka-broker-demo/kafka/producer"
 	"log"
 	"time"
 
