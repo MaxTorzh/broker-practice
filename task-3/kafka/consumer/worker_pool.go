@@ -72,7 +72,7 @@ func (wp *WorkerPool) processingMessage(workerID int, task WorkerTask) {
 	processingTime := time.Duration(100+workerID*50) * time.Millisecond
 	time.Sleep(processingTime)
 
-	fmt.Printf("[Worker %d] Message processed: partition=%d, offset=%d, value=%s (время: %v)\n",
+	fmt.Printf("[Worker %d] Message processed: partition=%d, offset=%d, value=%s (time: %v)\n",
 		workerID, msg.Partition, msg.Offset, string(msg.Value), processingTime)
 }
 
