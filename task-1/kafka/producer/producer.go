@@ -7,7 +7,6 @@ import (
 
 	"github.com/segmentio/kafka-go"
 )
-
 func RunProducer(brokers string, topic string) error {
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(brokers),
@@ -24,7 +23,7 @@ func RunProducer(brokers string, topic string) error {
 	for i := range 10 {
 		message := fmt.Sprintf("Hello, Kafka! Message #%d at %s", i+1, time.Now().Format("15:04:05.000"))
 		err := writer.WriteMessages(ctx, kafka.Message{
-			Key:   []byte(fmt.Sprintf("key-id", i)),
+			Key:   []byte(fmt.Sprintf("key-%d", i)),
 			Value: []byte(message),
 		})
 		if err != nil {
