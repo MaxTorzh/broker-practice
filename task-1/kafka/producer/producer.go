@@ -1,38 +1,38 @@
 package producer
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 )
 
-func RunProducer(brokers string, topic string, baseConfig *sarama.Config) error {
-
-	producer, err := sarama.NewSyncProducer([]string{brokers}, baseConfig)
-	if err != nil {
-		return fmt.Errorf("Can't create a producer: %w", err)
+func RunProducer(brokers string, topic string) error {
+	writer := &kafka.Writer{
+		Addr:         kafka.TCP(brokers),
+		Topic:        topic,
+		Balancer:     &kafka.LeastBytes{},
+		BatchTimeout: 10 * time.Millisecond,
+		RequiredAcks: kafka.RequireAll,
 	}
-
-	defer func() { _ = producer.Close() }() // закрытие producer для освобождения ресурсов
+	defer writer.Close()
 
 	fmt.Println("Producer starts, sending messages...")
 
+	ctx := context.Background()
 	for i := range 10 {
 		message := fmt.Sprintf("Hello, Kafka! Message #%d at %s", i+1, time.Now().Format("15:04:05.000"))
-		msg := &sarama.ProducerMessage{
-			Topic: topic,
-			Value: sarama.StringEncoder(message),
-		}
-
-		partition, offset, err := producer.SendMessage(msg)
+		err := writer.WriteMessages(ctx, kafka.Message{
+			Key:   []byte(fmt.Sprintf("key-id", i)),
+			Value: []byte(message),
+		})
 		if err != nil {
-			return fmt.Errorf("Sending message error %d: %w", i, err)
+			return fmt.Errorf("sending message error %d: %w", i, err)
 		}
-
-		fmt.Printf("Message %d send to: partition %d, offset %d\n", i, partition, offset)
+		fmt.Printf("Message %d send to: partition %d, offset %d\n",
+			i, 0, i)
 	}
-
 	fmt.Println("Producer finished work")
 	return nil
 }

@@ -4,83 +4,74 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 )
 
-type GroupHandler struct {
-	ready      chan bool
-	workerPool *WorkerPool // для параллельной обработки внутри партиции
-}
-
-func (h *GroupHandler) Setup(session sarama.ConsumerGroupSession) error {
-	close(h.ready)
-	fmt.Printf("Partitions are assigned: %v\n", session.Claims())
-	return nil
-}
-
-func (h *GroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
-	fmt.Println("Session is closed")
-	return nil
-}
-
-func (h *GroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	// Каждая партиция работает в своей горутине
-	for message := range claim.Messages() {
-		// worker pool для параллельной обработки внутри партиции
-		h.workerPool.Submit(WorkerTask{
-			Message: message,
-			Session: session,
-		})
+func RunConsumerGroup(brokers string, topic string, groupID string, numWorkers int) error {
+	config := kafka.ReaderConfig{
+		Brokers:        []string{brokers},
+		Topic:          topic,
+		GroupID:        groupID,
+		MinBytes:       10e3,
+		MaxBytes:       10e6,
+		StartOffset:    kafka.FirstOffset,
+		CommitInterval: time.Second,
 	}
-	return nil
-}
 
-func RunConsumerGroup(brokers string, topic string, groupID string, numWorkers int, config *sarama.Config) error {
-	// Настройки для consumer group
-	config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	config.Consumer.Offsets.AutoCommit.Enable = true
-	config.Consumer.Offsets.AutoCommit.Interval = 1 * time.Second
-
-	client, err := sarama.NewConsumerGroup([]string{brokers}, groupID, config)
-	if err != nil {
-		return fmt.Errorf("failed to create consumer group: %w", err)
-	}
-	defer client.Close()
+	reader := kafka.NewReader(config)
+	defer reader.Close()
 
 	workerPool := NewWorkerPool(numWorkers, 100)
 	workerPool.Start()
 
-	handler := &GroupHandler{
-		ready:      make(chan bool),
-		workerPool: workerPool,
-	}
+	fmt.Printf("Partitions are assigned and consumer group '%s' started with %d workers\n", groupID, numWorkers)
 
+	// Создание контекста с возможностью отмены
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Запуск consumer в горутине
 	go func() {
 		for {
-			if err := client.Consume(ctx, []string{topic}, handler); err != nil {
-				log.Printf("Error from consumer group: %v", err)
-			}
-			if ctx.Err() != nil {
+			select {
+			case <-ctx.Done():
+				fmt.Println("Shutting down consumer...")
 				return
+			default:
+				msg, err := reader.ReadMessage(ctx)
+				if err != nil {
+					if err == context.Canceled {
+						return
+					}
+					log.Printf("Error reading message: %v", err)
+					continue
+				}
+				workerPool.Submit(WorkerTask{
+					Message: msg,
+					Reader:  reader,
+				})
 			}
-			handler.ready = make(chan bool)
 		}
 	}()
 
-	<-handler.ready
-	fmt.Printf("Consumer group '%s' started with %d workers\n", groupID, numWorkers)
-
-	// Ждем сигнала завершения
-	time.Sleep(30 * time.Second)
-
+	// Ожидание сигнала остановки
+	<-sigChan
+	fmt.Println("\nReceived shutdown signal")
+	
+	// Отмена контекста
+	cancel()
+	
+	// Остановка worker pool
 	workerPool.Stop()
-	fmt.Println("Consumer group stopped")
-
+	
+	fmt.Println("Consumer group stopped gracefully")
 	return nil
-
 }

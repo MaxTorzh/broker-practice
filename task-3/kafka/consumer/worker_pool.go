@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 )
 
 // WorkerTask представляет задачу на обработку сообщения
 type WorkerTask struct {
-	Message *sarama.ConsumerMessage
-	Session sarama.ConsumerGroupSession
+	Message  kafka.Message
+	Reader   *kafka.Reader 
 }
 
 // WorkerPool управляет пулом воркеров для параллельной обработки
@@ -33,7 +33,7 @@ func NewWorkerPool(numWorkers int, bufferSize int) *WorkerPool {
 	}
 }
 
-// Start запускает воркер
+// Start запускает воркеров
 func (wp *WorkerPool) Start() {
 	for i := 0; i < wp.numWorkers; i++ {
 		wp.wg.Add(1)
@@ -52,10 +52,9 @@ func (wp *WorkerPool) worker(id int) {
 			key := fmt.Sprintf("%d-%d", task.Message.Partition, task.Message.Offset)
 			wp.processing.Store(key, time.Now())
 
-			wp.processingMessage(id, task)
+			wp.processMessage(id, task)
 
 			wp.processing.Delete(key)
-			task.Session.MarkMessage(task.Message, "")
 
 		case <-wp.quit:
 			fmt.Printf("Worker %d ends to work\n", id)
@@ -65,7 +64,7 @@ func (wp *WorkerPool) worker(id int) {
 }
 
 // processMessage имитирует бизнес-логику обработки сообщения
-func (wp *WorkerPool) processingMessage(workerID int, task WorkerTask) {
+func (wp *WorkerPool) processMessage(workerID int, task WorkerTask) {
 	msg := task.Message
 
 	// Симуляция разного времени обработки для наглядности
@@ -81,7 +80,7 @@ func (wp *WorkerPool) Submit(task WorkerTask) {
 	case wp.tasks <- task:
 	default:
 		log.Printf("Worker queue is overloaded! Message offset=%d will be processed later", task.Message.Offset)
-		wp.tasks <- task // все равно отправится, но это заблокируется
+		wp.tasks <- task
 	}
 }
 
@@ -101,14 +100,5 @@ func (wp *WorkerPool) Stop() {
 
 	if len(inProgress) > 0 {
 		fmt.Printf("There are tasks in progress: %v\n", inProgress)
-	}
-}
-
-// GetStats возвращает статистику пула
-func (wp *WorkerPool) GetStats() map[string]interface{} {
-	return map[string]interface{}{
-		"num_workers": wp.numWorkers,
-		"queue_size":  len(wp.tasks),
-		"capacity":    cap(wp.tasks),
 	}
 }

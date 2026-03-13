@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"task-2/kafka/consumer"
-	"task-2/kafka/producer"
 	"time"
 
-	"github.com/IBM/sarama"
+	"task-2/kafka/consumer"
+	"task-2/kafka/producer"
+
+	"github.com/segmentio/kafka-go"
 )
 
 const (
@@ -15,50 +17,52 @@ const (
 )
 
 func main() {
-	// Настройка конфигурации
-	config := sarama.NewConfig()
-	config.Version = sarama.V2_6_0_0
-
-	// Для асинхронного producer нужно включить опции
-	config.Producer.Return.Successes = true // получать подтверждения об успехе
-	config.Producer.Return.Errors = true    // получать ошибки
-
-	// Настройки для батчинга
-	config.Producer.Flush.Frequency = 300 * time.Millisecond // отправлять пачку каждые 300мс
-	config.Producer.Flush.Messages = 5                       // или когда накопится 5 сообщений
-
-	admin, err := sarama.NewClusterAdmin([]string{brokerAddr}, config)
-	if err != nil {
-		log.Fatalf("Failed to create admin client: %v", err)
-	}
-	defer admin.Close()
-
-	if err := createTopic(admin, topicName); err != nil {
+	// Создание топика
+	if err := createTopic(); err != nil {
 		log.Printf("Topic creation warning: %v", err)
 	} else {
 		log.Printf("Topic '%s' created", topicName)
 	}
 
-	// Запуск асинхронного producer в отдельной горутине
+	// Запуск асинхронного producer
 	go func() {
-		time.Sleep(2 * time.Second) // даем consumer время на запуск
-		if err := producer.RunAsyncProducer(brokerAddr, topicName, config); err != nil {
+		time.Sleep(2 * time.Second)
+		if err := producer.RunAsyncProducer(brokerAddr, topicName); err != nil {
 			log.Printf("Producer error: %v", err)
 		}
 	}()
 
-	// Запуск consumer в главной горутине
-	if err := consumer.RunConsumer(brokerAddr, topicName, config); err != nil {
+	// Запуск consumer
+	if err := consumer.RunConsumer(brokerAddr, topicName); err != nil {
 		log.Fatalf("Consumer error: %v", err)
 	}
 
 	log.Println("Application finished")
 }
 
-func createTopic(admin sarama.ClusterAdmin, topic string) error {
-	topicDetail := &sarama.TopicDetail{
+func createTopic() error {
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	controller, err := conn.Controller()
+	if err != nil {
+		return err
+	}
+
+	controllerConn, err := kafka.Dial("tcp", fmt.Sprintf("%s:%d", controller.Host, controller.Port))
+	if err != nil {
+		return err
+	}
+	defer controllerConn.Close()
+
+	topicConfig := kafka.TopicConfig{
+		Topic:             topicName,
 		NumPartitions:     1,
 		ReplicationFactor: 1,
 	}
-	return admin.CreateTopic(topic, topicDetail, false)
+
+	return controllerConn.CreateTopics(topicConfig)
 }

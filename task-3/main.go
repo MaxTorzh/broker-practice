@@ -2,13 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"time"
 
 	"task-3/kafka/consumer"
 	"task-3/kafka/producer"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 )
 
 const (
@@ -17,56 +18,57 @@ const (
 )
 
 func main() {
-	var mode string
 	var workers int
-	flag.StringVar(&mode, "mode", "group", "consumer mode: group or parallel")
-	flag.IntVar(&workers, "workers", 3, "number of workers/consumers")
+	flag.IntVar(&workers, "workers", 3, "number of workers")
 	flag.Parse()
 
-	config := sarama.NewConfig()
-	config.Version = sarama.V2_6_0_0
-	config.Producer.Return.Successes = true
-	config.Producer.Return.Errors = true
-	
-	config.Consumer.Offsets.Initial = sarama.OffsetOldest
-
-	admin, err := sarama.NewClusterAdmin([]string{brokerAddr}, config)
-	if err != nil {
-		log.Fatalf("Failed to create admin client: %v", err)
-	}
-	defer admin.Close()
-
-	if err := createTopic(admin, topicName); err != nil {
+	// Создание топика с 3 партициями
+	if err := createTopic(); err != nil {
 		log.Printf("Topic creation warning: %v", err)
 	} else {
-		log.Printf("Topic '%s' created", topicName)
+		log.Printf("Topic '%s' created with 3 partitions", topicName)
 	}
 
+	// Запуск producer
 	go func() {
 		time.Sleep(2 * time.Second)
-		configCopy := *config
-		if err := producer.RunAsyncProducer(brokerAddr, topicName, &configCopy); err != nil {
+		if err := producer.RunAsyncProducer(brokerAddr, topicName); err != nil {
 			log.Printf("Producer error: %v", err)
 		}
 	}()
 
-	switch mode {
-	case "group":
-		log.Printf("Consumer group starting with %d workers", workers)
-		if err := consumer.RunConsumerGroup(brokerAddr, topicName, "my-group", workers, config); err != nil {
-			log.Fatalf("Consumer group error: %v", err)
-		}
-	default:
-		log.Fatalf("Unknown mode: %s", mode)
+	// Запуск consumer group
+	log.Printf("Consumer group starting with %d workers", workers)
+	if err := consumer.RunConsumerGroup(brokerAddr, topicName, "my-group", workers); err != nil {
+		log.Fatalf("Consumer group error: %v", err)
 	}
 
 	log.Println("Application finished")
 }
 
-func createTopic(admin sarama.ClusterAdmin, topic string) error {
-	topicDetail := &sarama.TopicDetail{
+func createTopic() error {
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	controller, err := conn.Controller()
+	if err != nil {
+		return err
+	}
+
+	controllerConn, err := kafka.Dial("tcp", fmt.Sprintf("%s:%d", controller.Host, controller.Port))
+	if err != nil {
+		return err
+	}
+	defer controllerConn.Close()
+
+	topicConfig := kafka.TopicConfig{
+		Topic:             topicName,
 		NumPartitions:     3,
 		ReplicationFactor: 1,
 	}
-	return admin.CreateTopic(topic, topicDetail, false)
+
+	return controllerConn.CreateTopics(topicConfig)
 }
